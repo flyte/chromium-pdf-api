@@ -60,7 +60,7 @@ async def get_pdf(uri, options=None):
                     rx = json.loads(await ws.recv())
                     if rx.get("id") == 2:
                         return rx
-                    asyncio.sleep(0.1)
+                    await asyncio.sleep(0.1)
         finally:
             async with session.get(f"{CDP_HOST}/json/close/{page_id}") as resp:
                 await resp.text()
