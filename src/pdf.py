@@ -9,8 +9,14 @@ import aiohttp
 import websockets
 
 LOG = logging.getLogger(__name__)
+# LOG.addHandler(logging.StreamHandler())
+# LOG.setLevel(logging.DEBUG)
 
 USED_IDS = set()
+
+
+class PayloadTooBig(Exception):
+    pass
 
 
 def random_id():
@@ -34,6 +40,9 @@ async def send_ws_cmd(ws, id, method, params=None):
 
 
 async def wait_for_page_load(ws, navigate_cmd_id, timeout_secs=30):
+    # IDEA: Possible implementations -@flyte at 21/05/2019, 17:03:44
+    # Should probably implement a check for main frame 404 so we don't accidentally
+    # print the 404 and hand it back to the user as if nothing went wrong.
     main_frame = None
     frames_loading = set()
     frames_complete = set()
@@ -108,9 +117,17 @@ async def get_pdf(
                 LOG.info("Navigating tab to %r", url)
                 await send_ws_cmd(ws, navigate_cmd_id, "Page.navigate", dict(url=url))
                 LOG.info("Waiting for page to load")
-                await wait_for_page_load(ws, navigate_cmd_id, load_timeout)
+                load_timed_out = False
+                try:
+                    await wait_for_page_load(ws, navigate_cmd_id, load_timeout)
+                except TimeoutError:
+                    load_timed_out = True
                 LOG.info("Printing PDF")
-                return await print_pdf(ws, options, print_timeout)
+                return await print_pdf(ws, options, print_timeout), load_timed_out
+        except websockets.exceptions.ConnectionClosed as e:
+            if isinstance(e.__cause__, websockets.exceptions.PayloadTooBig):
+                raise PayloadTooBig("PDF exceeded maximum size")
+            raise
         finally:
             # Close the tab on the browser
             async with session.get(f"{cdp_host}/json/close/{tab_id}") as resp:
