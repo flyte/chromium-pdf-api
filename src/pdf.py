@@ -1,7 +1,6 @@
 import asyncio
 import json
 import logging
-from base64 import b64decode
 from datetime import datetime, timedelta
 from random import randint
 from time import time
@@ -72,7 +71,7 @@ async def print_pdf(ws, options, timeout_secs=10):
         except asyncio.TimeoutError:
             continue
         if rx.get("id") == cmd_id:
-            return b64decode(rx["result"]["data"])
+            return rx["result"]["data"]
     raise TimeoutError()
 
 
@@ -86,7 +85,7 @@ async def get_pdf(
 ):
     """
     Create a new tab on a browser, navigate to the page, wait for it to load and capture
-    a PDF. max_size is 20MB by default.
+    a PDF. Closes tab afterwards. max_size is 20MB by default.
     """
     if options is None:
         options = {}
