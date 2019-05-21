@@ -10,8 +10,6 @@ import aiohttp
 import websockets
 
 LOG = logging.getLogger(__name__)
-LOG.addHandler(logging.StreamHandler())
-LOG.setLevel(logging.DEBUG)
 
 USED_IDS = set()
 
