@@ -40,7 +40,7 @@ async def wait_for_page_load(ws, navigate_cmd_id, timeout_secs=30):
     timeout = datetime.now() + timedelta(seconds=timeout_secs)
     while not frames_complete or frames_loading != frames_complete:
         if datetime.now() > timeout:
-            raise TimeoutError()
+            raise TimeoutError("Timeout waiting for page to load")
         try:
             rx = json.loads(await asyncio.wait_for(ws.recv(), timeout=1))
             LOG.debug("Message received: %r", rx)
@@ -72,7 +72,7 @@ async def print_pdf(ws, options, timeout_secs=10):
             continue
         if rx.get("id") == cmd_id:
             return rx["result"]["data"]
-    raise TimeoutError()
+    raise TimeoutError("Timeout printing PDF")
 
 
 async def get_pdf(
@@ -89,6 +89,9 @@ async def get_pdf(
     """
     if options is None:
         options = {}
+    max_size = int(max_size)
+    load_timeout = float(load_timeout)
+    print_timeout = float(print_timeout)
 
     async with aiohttp.ClientSession() as session:
         # Open a new browser tab
