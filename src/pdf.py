@@ -48,6 +48,7 @@ async def wait_for_page_load(ws, navigate_cmd_id, timeout_secs=30):
     # Should probably implement a check for main frame 404 so we don't accidentally
     # print the 404 and hand it back to the user as if nothing went wrong.
     main_frame = None
+    main_request = None
     frames_loading = set()
     frames_complete = set()
     timeout = datetime.now() + timedelta(seconds=timeout_secs)
@@ -67,6 +68,16 @@ async def wait_for_page_load(ws, navigate_cmd_id, timeout_secs=30):
             except KeyError:
                 pass
             frames_loading.add(main_frame)
+        elif main_request is None and method == "Network.requestWillBeSent":
+            main_request = rx["params"]["requestId"]
+        elif main_request is not None and method == "Network.responseReceived":
+            if rx["params"]["requestId"] != main_request:
+                continue
+            status_str = str(rx["params"]["response"]["status"])
+            if status_str[0] in "45":  # 400 or 500 error
+                raise NavigationError(
+                    f"Main URL failed to load: HTTP status {status_str}"
+                )
         elif method == "Page.frameStartedLoading":
             frames_loading.add(rx["params"]["frameId"])
         elif method == "Page.frameStoppedLoading":
