@@ -12,7 +12,7 @@ CDP_HOST = "http://localhost:9222"
 
 
 loop = asyncio.get_event_loop()
-res = loop.run_until_complete(get_pdf(CDP_HOST, sys.argv[1]))
+pdf_b64, _ = loop.run_until_complete(get_pdf(CDP_HOST, sys.argv[1]))
 with open("/tmp/pdf.pdf", "wb") as f:
-    f.write(b64decode(res))
+    f.write(b64decode(pdf_b64))
 subprocess.check_call(["xdg-open", "/tmp/pdf.pdf"])

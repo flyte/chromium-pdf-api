@@ -9,13 +9,17 @@ import aiohttp
 import websockets
 
 LOG = logging.getLogger(__name__)
-# LOG.addHandler(logging.StreamHandler())
-# LOG.setLevel(logging.DEBUG)
+LOG.addHandler(logging.StreamHandler())
+LOG.setLevel(logging.DEBUG)
 
 USED_IDS = set()
 
 
 class PayloadTooBig(Exception):
+    pass
+
+
+class NavigationError(Exception):
     pass
 
 
@@ -58,6 +62,10 @@ async def wait_for_page_load(ws, navigate_cmd_id, timeout_secs=30):
         method = rx.get("method")
         if rx.get("id") == navigate_cmd_id:
             main_frame = rx["result"]["frameId"]
+            try:
+                raise NavigationError(rx["result"]["errorText"])
+            except KeyError:
+                pass
             frames_loading.add(main_frame)
         elif method == "Page.frameStartedLoading":
             frames_loading.add(rx["params"]["frameId"])
@@ -76,7 +84,7 @@ async def print_pdf(ws, options, timeout_secs=10):
     while not datetime.now() > timeout:
         try:
             rx = json.loads(await asyncio.wait_for(ws.recv(), timeout=1))
-            LOG.debug("Message received: %r", rx)
+            # LOG.debug("Message received: %r", rx)
         except asyncio.TimeoutError:
             continue
         if rx.get("id") == cmd_id:
@@ -113,6 +121,7 @@ async def get_pdf(
             ws_url = tab_info["webSocketDebuggerUrl"]
             async with websockets.connect(ws_url, max_size=max_size) as ws:
                 await send_ws_cmd(ws, random_id(), "Page.enable")
+                await send_ws_cmd(ws, random_id(), "Network.enable")
                 navigate_cmd_id = random_id()
                 LOG.info("Navigating tab to %r", url)
                 await send_ws_cmd(ws, navigate_cmd_id, "Page.navigate", dict(url=url))
