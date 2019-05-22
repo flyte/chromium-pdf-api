@@ -1,7 +1,7 @@
 import json
 
 from aiohttp import web
-from pdf import get_pdf, PayloadTooBig
+from pdf import get_pdf, PayloadTooBig, NavigationError
 
 CDP_HOST = "http://localhost:9222"
 
@@ -24,6 +24,14 @@ def payload_too_large(msg, data=None):
     return web.json_response(dict(error=msg, **data), status=413)
 
 
+def failed_dependency(msg, url, code, data=None):
+    if data is None:
+        data = {}
+    return web.json_response(
+        dict(error=msg, failed_url=url, status_code=code, **data), status=424
+    )
+
+
 async def pdf(request):
     try:
         data = await request.json()
@@ -39,6 +47,9 @@ async def pdf(request):
         return gateway_timeout(str(e), data)
     except PayloadTooBig as e:
         return payload_too_large(str(e), data)
+    except NavigationError as e:
+        url = e.url or data["url"]
+        return failed_dependency(str(e), url, e.code)
 
     return web.json_response(dict(pdf=pdf, load_timed_out=load_timed_out, **data))
 

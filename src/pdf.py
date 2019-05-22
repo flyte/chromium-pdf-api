@@ -9,8 +9,8 @@ import aiohttp
 import websockets
 
 LOG = logging.getLogger(__name__)
-LOG.addHandler(logging.StreamHandler())
-LOG.setLevel(logging.DEBUG)
+# LOG.addHandler(logging.StreamHandler())
+# LOG.setLevel(logging.DEBUG)
 
 USED_IDS = set()
 
@@ -20,7 +20,10 @@ class PayloadTooBig(Exception):
 
 
 class NavigationError(Exception):
-    pass
+    def __init__(self, *args, url=None, code=None, **kwargs):
+        self.url = url
+        self.code = code
+        super().__init__(*args, **kwargs)
 
 
 def random_id():
@@ -64,7 +67,9 @@ async def wait_for_page_load(ws, navigate_cmd_id, timeout_secs=30):
         if rx.get("id") == navigate_cmd_id:
             main_frame = rx["result"]["frameId"]
             try:
-                raise NavigationError(rx["result"]["errorText"])
+                raise NavigationError(
+                    f'Main URL failed to load: {rx["result"]["errorText"]}'
+                )
             except KeyError:
                 pass
             frames_loading.add(main_frame)
@@ -76,7 +81,9 @@ async def wait_for_page_load(ws, navigate_cmd_id, timeout_secs=30):
             status_str = str(rx["params"]["response"]["status"])
             if status_str[0] in "45":  # 400 or 500 error
                 raise NavigationError(
-                    f"Main URL failed to load: HTTP status {status_str}"
+                    f"Main URL failed to load: HTTP status {status_str}",
+                    url=rx["params"]["response"]["url"],
+                    code=rx["params"]["response"]["status"],
                 )
         elif method == "Page.frameStartedLoading":
             frames_loading.add(rx["params"]["frameId"])
