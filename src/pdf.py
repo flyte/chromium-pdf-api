@@ -47,9 +47,6 @@ async def send_ws_cmd(ws, id, method, params=None):
 
 
 async def wait_for_page_load(ws, navigate_cmd_id, timeout_secs=30):
-    # IDEA: Possible implementations -@flyte at 21/05/2019, 17:03:44
-    # Should probably implement a check for main frame 404 so we don't accidentally
-    # print the 404 and hand it back to the user as if nothing went wrong.
     main_frame = None
     main_request = None
     frames_loading = set()
