@@ -9,8 +9,8 @@ import aiohttp
 import websockets
 
 LOG = logging.getLogger(__name__)
-# LOG.addHandler(logging.StreamHandler())
-# LOG.setLevel(logging.DEBUG)
+LOG.addHandler(logging.StreamHandler())
+LOG.setLevel(logging.INFO)
 
 USED_IDS = set()
 
@@ -124,6 +124,8 @@ async def get_pdf(
     max_size = int(max_size)
     load_timeout = float(load_timeout)
     print_timeout = float(print_timeout)
+
+    LOG.info(f"Getting PDF from {url} with options {options}")
 
     async with aiohttp.ClientSession() as session:
         # Open a new browser tab
