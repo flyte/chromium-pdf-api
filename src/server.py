@@ -1,9 +1,15 @@
 import json
+import logging
 
 from aiohttp import web
-from pdf import get_pdf, PayloadTooBig, NavigationError
+
+from pdf import NavigationError, PayloadTooBig, get_pdf
 
 CDP_HOST = "http://localhost:9222"
+
+LOG = logging.getLogger(__name__)
+LOG.addHandler(logging.StreamHandler())
+LOG.setLevel(logging.INFO)
 
 
 def bad_request(msg, data=None):
@@ -40,6 +46,8 @@ async def pdf(request):
 
     if "url" not in data:
         return bad_request("Must provide 'url'", data)
+
+    LOG.info(f"Generating PDF for url {data['url']}")
 
     try:
         pdf, load_timed_out = await get_pdf(CDP_HOST, **data)
