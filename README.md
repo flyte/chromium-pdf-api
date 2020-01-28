@@ -82,6 +82,12 @@ Timeout waiting for Chromium to reply with the 'printed' PDF
 }
 ```
 
+## Healthcheck
+
+You may HTTP GET the `/healthcheck/` endpoint to have the server perform a cursory healthcheck to ensure it can communicate with Chromium's DevTools API.
+
+Returns a status code of `200` if communication is successful and `500` if not.
+
 ## Memory and concurrency
 
 Chrom(e|ium) has a tendency to guzzle as much memory as it can get its hands on. You may find that this docker image crashes with an error along the lines of:
