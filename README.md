@@ -81,3 +81,21 @@ Timeout waiting for Chromium to reply with the 'printed' PDF
     "error": "Timeout printing PDF"
 }
 ```
+
+## Memory and concurrency
+
+Chrom(e|ium) has a tendency to guzzle as much memory as it can get its hands on. You may find that this docker image crashes with an error along the lines of:
+
+```
+FATAL:memory.cc(22)] Out of memory. size=262144
+```
+
+In this case, you will need to increase the shared memory size using the `--shm-size=512M` command. The default is only `64M` so you may want to experiment with what size suits you, based on how many tabs you're likely to have open at once.
+
+Another potential issue is how many tabs you really want to have open at once. This is by default limited to 10, but you can set this to whatever you like, using the `PDF_CONCURRENCY` environment variable:
+
+```
+docker run -ti --rm -p 8080:8080 -e PDF_CONCURRENCY=2 flyte/chromium-pdf-api
+```
+
+This can help to plan for the amount of memory your container is going to use, although it really depends how much memory the site you're PDFing uses as well.

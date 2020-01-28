@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 from datetime import datetime, timedelta
+from os import environ as env
 from random import randint
 from time import time
 
@@ -13,6 +14,8 @@ LOG.addHandler(logging.StreamHandler())
 LOG.setLevel(logging.INFO)
 
 USED_IDS = set()
+
+SEMAPHORE = asyncio.Semaphore(int(env.get("PDF_CONCURRENCY", 10)))
 
 
 class PayloadTooBig(Exception):
@@ -125,36 +128,43 @@ async def get_pdf(
     load_timeout = float(load_timeout)
     print_timeout = float(print_timeout)
 
-    LOG.info(f"Getting PDF from {url} with options {options}")
+    # Wait for a semaphore to become available so we don't run more than n tasks
+    # concurrently.
+    async with SEMAPHORE:
+        LOG.info(f"Getting PDF from {url} with options {options}")
 
-    async with aiohttp.ClientSession() as session:
-        # Open a new browser tab
-        LOG.info("Opening new browser tab")
-        async with session.get(f"{cdp_host}/json/new") as resp:
-            tab_info = await resp.json()
-        tab_id = tab_info["id"]
-        LOG.info("New browser tab opened with ID %r", tab_id)
-        try:
-            ws_url = tab_info["webSocketDebuggerUrl"]
-            async with websockets.connect(ws_url, max_size=max_size) as ws:
-                await send_ws_cmd(ws, random_id(), "Page.enable")
-                await send_ws_cmd(ws, random_id(), "Network.enable")
-                navigate_cmd_id = random_id()
-                LOG.info("Navigating tab to %r", url)
-                await send_ws_cmd(ws, navigate_cmd_id, "Page.navigate", dict(url=url))
-                LOG.info("Waiting for page to load")
-                load_timed_out = False
-                try:
-                    await wait_for_page_load(ws, navigate_cmd_id, load_timeout)
-                except TimeoutError:
-                    load_timed_out = True
-                LOG.info("Printing PDF")
-                return await print_pdf(ws, options, print_timeout), load_timed_out
-        except websockets.exceptions.ConnectionClosed as e:
-            if isinstance(e.__cause__, websockets.exceptions.PayloadTooBig):
-                raise PayloadTooBig("PDF exceeded maximum size")
-            raise
-        finally:
-            # Close the tab on the browser
-            async with session.get(f"{cdp_host}/json/close/{tab_id}") as resp:
-                await resp.text()
+        async with aiohttp.ClientSession() as session:
+            # Open a new browser tab
+            LOG.info("Opening new browser tab")
+            async with session.get(f"{cdp_host}/json/new") as resp:
+                tab_info = await resp.json()
+            tab_id = tab_info["id"]
+            LOG.info("New browser tab opened with ID %r", tab_id)
+            try:
+                ws_url = tab_info["webSocketDebuggerUrl"]
+                # ping_interval=None because of
+                # https://github.com/aaugustin/websockets/issues/618
+                async with websockets.connect(
+                    ws_url, max_size=max_size, ping_interval=None
+                ) as ws:
+                    await send_ws_cmd(ws, random_id(), "Page.enable")
+                    await send_ws_cmd(ws, random_id(), "Network.enable")
+                    navigate_cmd_id = random_id()
+                    LOG.info("Navigating tab to %r", url)
+                    await send_ws_cmd(ws, navigate_cmd_id, "Page.navigate", dict(url=url))
+                    LOG.info("Waiting for page to load")
+                    load_timed_out = False
+                    try:
+                        await wait_for_page_load(ws, navigate_cmd_id, load_timeout)
+                    except TimeoutError:
+                        load_timed_out = True
+                    LOG.info("Printing PDF")
+                    return await print_pdf(ws, options, print_timeout), load_timed_out
+            except websockets.exceptions.ConnectionClosed as e:
+                if isinstance(e.__cause__, websockets.exceptions.PayloadTooBig):
+                    raise PayloadTooBig("PDF exceeded maximum size")
+                raise
+            finally:
+                # Close the tab on the browser
+                async with session.get(f"{cdp_host}/json/close/{tab_id}") as resp:
+                    await resp.text()
