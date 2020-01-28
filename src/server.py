@@ -3,7 +3,7 @@ import logging
 
 from aiohttp import web
 
-from pdf import NavigationError, PayloadTooBig, get_pdf
+from pdf import NavigationError, PayloadTooBig, get_pdf, chrome_ok
 
 CDP_HOST = "http://localhost:9222"
 
@@ -62,7 +62,15 @@ async def pdf(request):
     return web.json_response(dict(pdf=pdf, load_timed_out=load_timed_out, **data))
 
 
+async def healthcheck(request):
+    try:
+        await chrome_ok(CDP_HOST)
+    except Exception as e:
+        return web.Response(text=e, status=500)
+    return web.Response(text="OK")
+
+
 if __name__ == "__main__":
     app = web.Application()
-    app.add_routes([web.post("/", pdf)])
+    app.add_routes([web.post("/", pdf), web.get("/healthcheck/", healthcheck)])
     web.run_app(app)

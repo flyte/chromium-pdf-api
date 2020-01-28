@@ -110,6 +110,14 @@ async def print_pdf(ws, options, timeout_secs=10):
     raise TimeoutError("Timeout printing PDF")
 
 
+async def chrome_ok(cdp_host):
+    # Check that the JSON API works
+    async with aiohttp.ClientSession() as session:
+        async with session.get(f"{cdp_host}/json") as resp:
+            assert resp.status == 200, f"Chromium's JSON API returned {resp.status}"
+            await resp.json()
+
+
 async def get_pdf(
     cdp_host,
     url,
