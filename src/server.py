@@ -1,15 +1,21 @@
 import json
 import logging
+from os import environ as env
 
 from aiohttp import web
-
-from pdf import NavigationError, PayloadTooBig, get_pdf, chrome_ok
+from pdf import NavigationError, PayloadTooBig, chrome_ok, get_pdf
 
 CDP_HOST = "http://localhost:9222"
 
+# Set the log level for this module
 LOG = logging.getLogger(__name__)
 LOG.addHandler(logging.StreamHandler())
-LOG.setLevel(logging.INFO)
+LOG.setLevel(getattr(logging, env.get("SERVER_LOG_LEVEL", "INFO").upper()))
+
+# Set the log level of the pdf module as well
+_PDF_LOG = logging.getLogger("pdf")
+_PDF_LOG.addHandler(logging.StreamHandler())
+_PDF_LOG.setLevel(getattr(logging, env.get("PDF_LOG_LEVEL", "INFO").upper()))
 
 
 def bad_request(msg, data=None):
