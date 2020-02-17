@@ -47,9 +47,23 @@ async def send_ws_cmd(ws, id, method, params=None):
     return await ws.send(json.dumps(dict(id=id, method=method, params=params)))
 
 
-async def wait_for_page_load(ws, navigate_cmd_id, timeout_secs=30):
+async def wait_for_cmd_response(ws, id, timeout_secs=30):
+    LOG.debug("Awaiting response to command with ID %r", id)
+    timeout = datetime.now() + timedelta(seconds=timeout_secs)
+    while True:
+        if datetime.now() > timeout:
+            raise TimeoutError("Timeout waiting for response to command ID %s" % id)
+        try:
+            rx = json.loads(await asyncio.wait_for(ws.recv(), timeout=1))
+            LOG.debug("Message received: %r", rx)
+        except asyncio.TimeoutError:
+            continue
+        if rx.get("id") == id:
+            return rx
+
+
+async def wait_for_page_load(ws, navigate_cmd_id, main_request_id, timeout_secs=30):
     main_frame = None
-    main_request = None
     frames_loading = set()
     frames_complete = set()
     timeout = datetime.now() + timedelta(seconds=timeout_secs)
@@ -71,10 +85,8 @@ async def wait_for_page_load(ws, navigate_cmd_id, timeout_secs=30):
             except KeyError:
                 pass
             frames_loading.add(main_frame)
-        elif main_request is None and method == "Network.requestWillBeSent":
-            main_request = rx["params"]["requestId"]
-        elif main_request is not None and method == "Network.responseReceived":
-            if rx["params"]["requestId"] != main_request:
+        elif method == "Network.responseReceived":
+            if rx["params"]["requestId"] != main_request_id:
                 continue
             status_str = str(rx["params"]["response"]["status"])
             if status_str[0] in "45":  # 400 or 500 error
@@ -104,6 +116,7 @@ async def print_pdf(ws, options, timeout_secs=10):
         except asyncio.TimeoutError:
             continue
         if rx.get("id") == cmd_id:
+            LOG.debug("Page.printToPDF response received")
             return rx["result"]["data"]
     raise TimeoutError("Timeout printing PDF")
 
@@ -153,15 +166,28 @@ async def get_pdf(
                 async with websockets.connect(
                     ws_url, max_size=max_size, ping_interval=None
                 ) as ws:
-                    await send_ws_cmd(ws, random_id(), "Page.enable")
-                    await send_ws_cmd(ws, random_id(), "Network.enable")
-                    navigate_cmd_id = random_id()
+                    cmd_id = random_id()
+                    await send_ws_cmd(ws, cmd_id, "Page.enable")
+                    await wait_for_cmd_response(ws, cmd_id, timeout_secs=4)
+                    cmd_id = random_id()
+                    await send_ws_cmd(ws, cmd_id, "Network.enable")
+                    await wait_for_cmd_response(ws, cmd_id, timeout_secs=4)
+                    cmd_id = random_id()
                     LOG.info("Navigating tab to %r", url)
-                    await send_ws_cmd(ws, navigate_cmd_id, "Page.navigate", dict(url=url))
+                    page_loading = False
+                    while not page_loading:
+                        await send_ws_cmd(ws, cmd_id, "Page.navigate", dict(url=url))
+                        try:
+                            await wait_for_cmd_response(ws, cmd_id, timeout_secs=4)
+                            page_loading = True
+                            LOG.debug("Page loading has begun")
+                        except TimeoutError:
+                            LOG.debug("Resending navigate command")
+                            continue
                     LOG.info("Waiting for page to load")
                     load_timed_out = False
                     try:
-                        await wait_for_page_load(ws, navigate_cmd_id, load_timeout)
+                        await wait_for_page_load(ws, cmd_id, load_timeout)
                     except TimeoutError:
                         load_timed_out = True
                     LOG.info("Printing PDF")
@@ -172,5 +198,6 @@ async def get_pdf(
                 raise
             finally:
                 # Close the tab on the browser
+                LOG.info("Closing browser tab %s", tab_id)
                 async with session.get(f"{cdp_host}/json/close/{tab_id}") as resp:
                     await resp.text()

@@ -65,6 +65,10 @@ async def pdf(request):
         url = e.url or data["url"]
         return failed_dependency(str(e), url, e.code)
 
+    if load_timed_out:
+        LOG.info("PDF returned, but timed out waiting for the page to finish loading")
+    else:
+        LOG.info("PDF returned successfully")
     return web.json_response(dict(pdf=pdf, load_timed_out=load_timed_out, **data))
 
 
