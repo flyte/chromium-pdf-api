@@ -1,5 +1,6 @@
 import asyncio
 import json
+from contextlib import contextmanager
 from random import randint
 
 import websockets
@@ -11,6 +12,18 @@ class Event:
 
 class FrameLoadingEvent(Event):
     pass
+
+
+@contextmanager
+def method_subscription(cdp, methods):
+    queue = asyncio.Queue()
+    try:
+        for method in methods:
+            cdp.add_method_queue(method, queue)
+        yield queue
+    finally:
+        for method in methods:
+            cdp.remove_method_queue(method, queue)
 
 
 class CDPSession:
@@ -30,6 +43,17 @@ class CDPSession:
             cid = randint(0, 1000000000)
         self._used_cmd_ids.add(cid)
         return cid
+
+    @contextmanager
+    def method_subscription(self, methods):
+        queue = asyncio.Queue()
+        try:
+            for method in methods:
+                self.add_method_queue(method, queue)
+            yield queue
+        finally:
+            for method in methods:
+                self.remove_method_queue(method, queue)
 
     async def connect(self, ws_url, **kwargs):
         self.ws_url = ws_url
@@ -67,19 +91,24 @@ class CDPSession:
             if await_response:
                 del self.cmd_futures[cmd_id]
 
-    async def subscribe(self, methods):
-        queue = asyncio.Queue()
-        for method in methods:
-            try:
-                self.method_queues[method].add(queue)
-            except KeyError:
-                self.method_queues[method] = {queue}
+    def add_method_queue(self, method, queue):
         try:
+            self.method_queues[method].add(queue)
+        except KeyError:
+            self.method_queues[method] = {queue}
+
+    def remove_method_queue(self, method, queue):
+        method_queues = self.method_queues[method]
+        method_queues.remove(queue)
+        if not method_queues:
+            del self.method_queues[method]
+
+    async def subscribe(self, methods):
+        with self.method_subscription(methods) as queue:
             while True:
                 yield await queue.get()
-        finally:
-            for method in methods:
-                method_queues = self.method_queues[method]
-                method_queues.remove(queue)
-                if not method_queues:
-                    del self.method_queues[method]
+
+    async def wait_for(self, method):
+        with self.method_subscription([method]) as queue:
+            return await queue.get()
+
