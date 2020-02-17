@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 from os import environ as env
@@ -56,7 +57,7 @@ async def pdf(request):
     LOG.info(f"Generating PDF for url {data['url']}")
 
     try:
-        pdf, load_timed_out = await get_pdf(CDP_HOST, **data)
+        pdf = await asyncio.wait_for(get_pdf(CDP_HOST, **data), 45)
     except TimeoutError as e:
         return gateway_timeout(str(e), data)
     except PayloadTooBig as e:
@@ -65,11 +66,8 @@ async def pdf(request):
         url = e.url or data["url"]
         return failed_dependency(str(e), url, e.code)
 
-    if load_timed_out:
-        LOG.info("PDF returned, but timed out waiting for the page to finish loading")
-    else:
-        LOG.info("PDF returned successfully")
-    return web.json_response(dict(pdf=pdf, load_timed_out=load_timed_out, **data))
+    LOG.info("PDF returned successfully")
+    return web.json_response(dict(pdf=pdf, **data))
 
 
 async def healthcheck(request):
