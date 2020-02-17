@@ -48,6 +48,8 @@ class CDPSession:
                 pass
             for queue in self.method_queues.get(method, []):
                 queue.put_nowait(data)
+            for queue in self.method_queues.get("*", []):
+                queue.put_nowait(data)
 
     async def send(self, method, params=None, await_response=True):
         if params is None:

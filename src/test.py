@@ -19,9 +19,7 @@ async def run(cdp):
         print(await cdp.send("Page.enable"))
         print(await cdp.send("Network.enable"))
         print(await cdp.send("Page.navigate", dict(url="https://www.welovemicro.com/")))
-        async for msg in cdp.subscribe(
-            ["Network.dataReceived", "Network.requestWillBeSent"]
-        ):
+        async for msg in cdp.subscribe(["*"]):
             print(msg)
     finally:
         async with aiohttp.ClientSession() as session:
