@@ -1,17 +1,33 @@
 import asyncio
+import logging
 from base64 import b64decode
 from datetime import datetime, timedelta
+from functools import partial
 from subprocess import check_call
 
 import aiohttp
-from client import CDPSession
+from client import CDPSession, ReceiveLoopStopped
+
+LOG = logging.getLogger(__name__)
+LOG.addHandler(logging.StreamHandler())
+LOG.setLevel(logging.DEBUG)
 
 CDP_HOST = "http://localhost:9222"
 
 
 async def print_events(cdp):
-    async for msg in cdp.subscribe(["*"]):
-        print(msg)
+    try:
+        async for msg in cdp.subscribe(["*"]):
+            print(msg)
+    except ReceiveLoopStopped:
+        pass
+
+
+def handle_exception(cdp, loop, context):
+    print("Exception handler called...")
+    msg = context.get("exception", context["message"])
+    print(msg)
+    loop.create_task(disconnect(cdp))
 
 
 async def run(cdp):
@@ -22,7 +38,7 @@ async def run(cdp):
 
     try:
         ws_url = tab_info["webSocketDebuggerUrl"]
-        await cdp.connect(ws_url, close_timeout=2, max_size=50 * 1024 ** 2)
+        await cdp.connect(ws_url, close_timeout=2, max_size=20 * 1024 ** 2)
 
         # # Open the devtools
         # check_call(
@@ -34,27 +50,31 @@ async def run(cdp):
         # # Wait for devtools to load
         # await asyncio.sleep(7)
 
-        print(await cdp.send("Page.enable"))
-        print(await cdp.send("Network.enable"))
-        print(
-            await cdp.send(
-                "Page.navigate", dict(url="https://staging.welovemicro.com/document/7/")
-            )
-        )
+        await cdp.send("Page.enable")
+        await cdp.send("Network.enable")
+        print("Navigating to URL...")
+        await cdp.send("Page.navigate", dict(url="https://staging.welovemicro.com/"))
+        print("Navigation started")
 
-        # # Print all of the messages
-        # loop = asyncio.get_event_loop()
-        # loop.create_task(print_events(cdp))
+        loop = asyncio.get_event_loop()
+        # Print all of the messages
+        print_all_msgs = False
+        if print_all_msgs:
+            loop.create_task(print_events(cdp))
 
         # Use one or the other to establish that the page has loaded
         # loaded_event = "Page.domContentEventFired"
         loaded_event = "Page.loadEventFired"
 
-        print("Awaiting load event...")
+        print("Awaiting page load...")
         await cdp.wait_for(loaded_event)
 
         print("Printing page...")
-        resp = await cdp.send("Page.printToPDF", await_response=True)
+        try:
+            resp = await cdp.send("Page.printToPDF")
+        except Exception:
+            LOG.exception("Exception during PDF creation:")
+            return
         pdf_fname = f"{tab_id}.pdf"
         with open(pdf_fname, "wb") as f:
             f.write(b64decode(resp["data"]))
@@ -85,6 +105,7 @@ async def disconnect(cdp):
 if __name__ == "__main__":
     cdp = CDPSession()
     loop = asyncio.get_event_loop()
+    loop.set_exception_handler(partial(handle_exception, cdp))
     try:
         loop.run_until_complete(run(cdp))
     except KeyboardInterrupt:
