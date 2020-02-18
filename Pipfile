@@ -7,7 +7,6 @@ verify_ssl = true
 jupyter = "*"
 
 [packages]
-connexion = {extras = ["swagger-ui"],version = "*"}
 websockets = "*"
 aiohttp = "*"
 
