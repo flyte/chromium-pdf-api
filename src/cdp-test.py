@@ -1,73 +1,113 @@
-#!/usr/bin/env python
-# coding: utf-8
-
 import asyncio
-import base64
-import json
-import subprocess
-import sys
-from time import sleep
+import logging
+from base64 import b64decode
+from datetime import datetime, timedelta
+from functools import partial
+from subprocess import check_call
 
 import aiohttp
-import websockets
+from client import CDPSession, ReceiveLoopStopped
+
+LOG = logging.getLogger(__name__)
+LOG.addHandler(logging.StreamHandler())
+LOG.setLevel(logging.DEBUG)
 
 CDP_HOST = "http://localhost:9222"
 
 
-async def get_pdf(uri, options=None):
-    if options is None:
-        options = {}
+async def print_events(cdp):
+    try:
+        async for msg in cdp.subscribe(["*"]):
+            print(msg)
+    except ReceiveLoopStopped:
+        pass
+
+
+def handle_exception(cdp, loop, context):
+    print("Exception handler called...")
+    msg = context.get("exception", context["message"])
+    print(msg)
+    loop.create_task(disconnect(cdp))
+
+
+async def run(cdp):
     async with aiohttp.ClientSession() as session:
         async with session.get(f"{CDP_HOST}/json/new") as resp:
-            page_info = await resp.json()
-        page_id = page_info["id"]
+            tab_info = await resp.json()
+    tab_id = tab_info["id"]
+
+    try:
+        ws_url = tab_info["webSocketDebuggerUrl"]
+        await cdp.connect(ws_url, close_timeout=2, max_size=20 * 1024 ** 2)
+
+        # # Open the devtools
+        # check_call(
+        #     [
+        #         "xdg-open",
+        #         f"http://localhost:9222/devtools/inspector.html?ws=localhost:9222/devtools/page/{tab_id}",
+        #     ]
+        # )
+        # # Wait for devtools to load
+        # await asyncio.sleep(7)
+
+        await cdp.send("Page.enable")
+        await cdp.send("Network.enable")
+        print("Navigating to URL...")
+        await cdp.send("Page.navigate", dict(url="https://www.welovemicro.com/"))
+        print("Navigation started")
+
+        loop = asyncio.get_event_loop()
+        # Print all of the messages
+        print_all_msgs = False
+        if print_all_msgs:
+            loop.create_task(print_events(cdp))
+
+        # Use one or the other to establish that the page has loaded
+        # loaded_event = "Page.domContentEventFired"
+        loaded_event = "Page.loadEventFired"
+
+        print("Awaiting page load...")
+        await cdp.wait_for(loaded_event)
+
+        print("Printing page...")
         try:
-            ws_uri = page_info["webSocketDebuggerUrl"]
-            async with websockets.connect(ws_uri, max_size=2 ** 50) as ws:
-                await ws.send(json.dumps(dict(id=0, method="Page.enable", params=dict())))
-                await ws.send(
-                    json.dumps(dict(id=1, method="Page.navigate", params=dict(url=uri)))
-                )
-
-                main_frame = None
-                frames_loading = set()
-                frames_complete = set()
-                while not frames_complete or frames_loading != frames_complete:
-                    rx = json.loads(await ws.recv())
-                    method = rx.get("method")
-                    if rx.get("id") == 1:
-                        main_frame = rx["result"]["frameId"]
-                        frames_loading.add(main_frame)
-                    elif method == "Page.frameStartedLoading":
-                        frames_loading.add(rx["params"]["frameId"])
-                    elif method == "Page.frameStoppedLoading":
-                        frame_id = rx["params"]["frameId"]
-                        frames_complete.add(frame_id)
-                        # IDEA: Possible implementations -@flyte at 20/05/2019, 22:53:43
-                        # Can probably just check the main frame, since it always seems
-                        # to finish loading last on the tests I've done.
-
-                    print(
-                        f"\rFrames loading: {len(frames_loading)} of {len(frames_complete)}",
-                        end="",
-                    )
-
-                print("\nPrinting PDF...")
-                await ws.send(
-                    json.dumps(dict(id=2, method="Page.printToPDF", params=options))
-                )
-                while True:
-                    rx = json.loads(await ws.recv())
-                    if rx.get("id") == 2:
-                        return rx
-                    await asyncio.sleep(0.1)
-        finally:
-            async with session.get(f"{CDP_HOST}/json/close/{page_id}") as resp:
+            resp = await cdp.send("Page.printToPDF")
+        except Exception:
+            LOG.exception("Exception during PDF creation:")
+            return
+        pdf_fname = f"{tab_id}.pdf"
+        with open(pdf_fname, "wb") as f:
+            f.write(b64decode(resp["data"]))
+        check_call(["xdg-open", pdf_fname])
+        print("Page printed!")
+    finally:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"{CDP_HOST}/json/close/{tab_id}") as resp:
                 await resp.text()
 
 
-loop = asyncio.get_event_loop()
-res = loop.run_until_complete(get_pdf(sys.argv[1]))
-with open("/tmp/pdf.pdf", "wb") as f:
-    f.write(base64.b64decode(res["result"]["data"]))
-subprocess.check_call(["xdg-open", "/tmp/pdf.pdf"])
+async def disconnect(cdp):
+    other_tasks = [
+        t for t in asyncio.Task.all_tasks() if t is not asyncio.Task.current_task()
+    ]
+    for t in other_tasks:
+        t.cancel()
+    cleanup = asyncio.gather(*other_tasks, return_exceptions=True)
+    print("Waiting for tasks to quit...")
+    try:
+        await asyncio.wait_for(cleanup, timeout=5)
+    except asyncio.TimeoutError:
+        print("Tasks did not quit within timeout, so exiting anyway.")
+    print("Disconnecting websocket...")
+    await cdp.ws.close()
+
+
+if __name__ == "__main__":
+    cdp = CDPSession()
+    loop = asyncio.get_event_loop()
+    loop.set_exception_handler(partial(handle_exception, cdp))
+    try:
+        loop.run_until_complete(run(cdp))
+    except KeyboardInterrupt:
+        loop.run_until_complete(disconnect(cdp))
+        loop.close()
