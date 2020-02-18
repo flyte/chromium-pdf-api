@@ -118,12 +118,10 @@ class CDPSession:
         self._msg_rx_task = self._loop.create_task(self._msg_rx_loop())
 
     async def _msg_rx_loop(self):
-        rx = []
         try:
             while True:
                 msg = await self._ws.recv()
                 data = json.loads(msg)
-                rx.append(data)
                 cmd_id = data.get("id")
                 method = data.get("method")
                 try:
@@ -138,10 +136,6 @@ class CDPSession:
             pass
         finally:
             self.listening_stopped.set()
-            import yaml
-
-            with open("/home/flyte/blah.yml", "w") as f:
-                yaml.dump(rx, f)
 
     async def send(self, method, params=None, await_response=True):
         if params is None:
@@ -187,7 +181,10 @@ class CDPSession:
     async def subscribe(self, methods):
         with self.method_subscription(methods) as queue:
             while not self.listening_stopped.is_set():
-                yield await queue.get()
+                try:
+                    yield await asyncio.wait_for(queue.get(), 1)
+                except asyncio.TimeoutError:
+                    continue
             raise ReceiveLoopStopped("CDP websocket listening loop has stopped")
 
     async def wait_for(self, method):
@@ -196,5 +193,4 @@ class CDPSession:
 
     async def disconnect(self):
         self._msg_rx_task.cancel()
-        # await self.listening_cancelled.wait()
         await self._ws.close()
