@@ -72,6 +72,9 @@ class FrameRequestListener:
                 )
             ):
                 self._request_id = msg["params"]["requestId"]
+                LOG.debug(
+                    "FrameId %s has a requestId of %s", self._frame_id, self._request_id
+                )
             elif all(
                 (
                     self._response is None,
@@ -80,6 +83,12 @@ class FrameRequestListener:
                 )
             ):
                 self._response = msg["params"]["response"]
+                LOG.debug(
+                    "FrameId %s has received a response of %s for url %s",
+                    self._frame_id,
+                    self._response["status"],
+                    self._response["url"],
+                )
                 return self._response
 
 

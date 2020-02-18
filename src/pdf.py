@@ -55,6 +55,11 @@ async def get_pdf(
         options = {}
     if loop is None:
         loop = asyncio.get_event_loop()
+    max_size = int(max_size)
+    load_timeout = int(load_timeout)
+    status_timeout = int(status_timeout)
+    print_timeout = int(print_timeout)
+
     cdp = CDPSession(loop=loop)
     async with aiohttp.ClientSession() as session:
         async with session.get(f"{cdp_host}/json/new") as resp:
@@ -70,6 +75,7 @@ async def get_pdf(
         # Get the tab's main frame ID
         ftree_resp = await cdp.send("Page.getFrameTree")
         main_frame_id = ftree_resp["frameTree"]["frame"]["id"]
+        LOG.debug(f"Tab %s main frame ID is %s", tab_id, main_frame_id)
 
         # Start frame request listener before we send the Page.navigate command since
         # the Network.requestWillBeSent message comes from the browser before the
@@ -77,6 +83,7 @@ async def get_pdf(
         req_listener = FrameRequestListener(cdp, main_frame_id, loop=loop)
 
         # Tell the tab to navigate to the desired URL
+        LOG.debug("Navigating tab %s frame %s to url %s", tab_id, main_frame_id, url)
         nav_resp = await cdp.send("Page.navigate", dict(url=url, frameId=main_frame_id))
         try:
             raise NavigationError(
@@ -84,25 +91,41 @@ async def get_pdf(
             )
         except KeyError:
             pass
+        LOG.debug("Navigation response received")
 
         # Wait for the page to load
+        LOG.debug(
+            "Awaiting page load using event %s for %s seconds", loaded_event, load_timeout
+        )
         try:
             await asyncio.wait_for(cdp.wait_for(loaded_event), timeout=load_timeout)
         except asyncio.TimeoutError:
+            LOG.debug("Page load timed out")
             raise PageLoadTimeout()
+        LOG.debug("Page finished loading")
 
         # Check if the main page had a successful status code (the task should have
         # already completed long before the page finished loading.)
+        LOG.debug("Awaiting main request status for %s seconds", status_timeout)
         try:
             response = await asyncio.wait_for(req_listener, timeout=status_timeout)
         except asyncio.TimeoutError:
+            LOG.debug("Timeout waiting for status to be received")
             raise StatusTimeout()
+        LOG.debug("Main request status received (%s)", response["status"])
+
         if str(response["status"])[0] != "2":
             raise NavigationError(
                 f"Main URL failed to load: HTTP status {response['status']}",
                 url=response["url"],
                 code=response["status"],
             )
+
+        LOG.debug(
+            "Awaiting PDF print for %s seconds using the following options: %s",
+            print_timeout,
+            options,
+        )
         try:
             pdf_resp = await asyncio.wait_for(
                 cdp.send("Page.printToPDF", options), timeout=print_timeout

@@ -47,8 +47,10 @@ Everything except for the `url` parameter is optional.
 {
     "url": "<url of page to turn into PDF>",
     "max_size": "<maximum size (in bytes) of the PDF - will error if exceeded>",
+    "timeout": "<maximum seconds to wait overall>",
     "load_timeout": "<maximum seconds to wait for the page to finish loading>",
-    "print_timeout": "<maximum seconds to wait for the PDF to 'print' - will error if exceeded>",
+    "status_timeout": "<maximum seconds to wait for the main HTTP request to return>",
+    "print_timeout": "<maximum seconds to wait for the PDF to 'print'>",
     "options": {
         # This is passed directly through to Chromium as options to the Page.printToPDF
         # function. You may omit this entirely, or use any of the options from this URL:

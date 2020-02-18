@@ -14,10 +14,15 @@ LOG = logging.getLogger(__name__)
 LOG.addHandler(logging.StreamHandler())
 LOG.setLevel(getattr(logging, env.get("SERVER_LOG_LEVEL", "INFO").upper()))
 
-# Set the log level of the pdf module as well
+# Set the log level of the pdf module
 _PDF_LOG = logging.getLogger("pdf")
 _PDF_LOG.addHandler(logging.StreamHandler())
 _PDF_LOG.setLevel(getattr(logging, env.get("PDF_LOG_LEVEL", "INFO").upper()))
+
+# Set the log level of the cdp module
+_CDP_LOG = logging.getLogger("cdp")
+_CDP_LOG.addHandler(logging.StreamHandler())
+_CDP_LOG.setLevel(getattr(logging, env.get("CDP_LOG_LEVEL", "INFO").upper()))
 
 
 def bad_request(msg, data=None):
@@ -54,11 +59,12 @@ async def pdf(request):
 
     if "url" not in data:
         return bad_request("Must provide 'url'", data)
+    timeout = int(data.pop("timeout", 120))
 
     LOG.info(f"Generating PDF for url {data['url']}")
 
     try:
-        pdf = await asyncio.wait_for(get_pdf(CDP_HOST, **data), 45)
+        pdf = await asyncio.wait_for(get_pdf(CDP_HOST, **data), timeout)
     except TimeoutError as e:
         return gateway_timeout(str(e), data)
     except PayloadTooBig as e:
