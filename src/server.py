@@ -4,7 +4,8 @@ import logging
 from os import environ as env
 
 from aiohttp import web
-from pdf import NavigationError, PayloadTooBig, chrome_ok, get_pdf
+from cdp import PayloadTooBig
+from pdf import NavigationError, chrome_ok, get_pdf
 
 CDP_HOST = "http://localhost:9222"
 
