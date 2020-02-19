@@ -1,28 +1,22 @@
 import asyncio
+import json
 from threading import Thread
 from time import sleep
 from unittest.mock import Mock, patch
 
 import pytest
 import websockets
+from cdp import CDPSession, FrameRequestListener
 from pdf import chrome_ok
 from werkzeug.wrappers import Response
 
 
-async def hello(websocket, path):
-    try:
-        while True:
-            name = await websocket.recv()
-            greeting = f"Hello {name}"
-            await websocket.send(greeting)
-    except websockets.exceptions.ConnectionClosed:
-        pass
-
-
 @pytest.yield_fixture
-def websocket_server():
+def websocket_server(request):
     loop = asyncio.new_event_loop()
-    server = websockets.serve(hello, "localhost", 8765, loop=loop)
+    server = websockets.serve(
+        globals()[f"proto_{request.function.__name__}"], "localhost", 8765, loop=loop
+    )
 
     def run():
         asyncio.set_event_loop(loop)
@@ -106,6 +100,15 @@ async def test_chrome_ok(httpserver):
     assert await chrome_ok(f"http://{httpserver.host}:{httpserver.port}") == None
 
 
+async def proto_test_ws_hello(websocket, path):
+    try:
+        name = await websocket.recv()
+        greeting = f"Hello {name}"
+        await websocket.send(greeting)
+    except websockets.ConnectionClosed:
+        pass
+
+
 @pytest.mark.asyncio
 async def test_ws_hello(websocket_server):
     ws_server, uri = websocket_server
@@ -114,3 +117,50 @@ async def test_ws_hello(websocket_server):
         await ws.send("flyte")
         resp = await ws.recv()
     assert resp == "Hello flyte"
+
+
+async def proto_test_frame_req_listener(websocket, path):
+    try:
+        navigate_cmd = json.loads(await websocket.recv())
+        await websocket.send(json.dumps(dict(id=navigate_cmd["id"], result={})))
+        await websocket.send(
+            json.dumps(
+                dict(
+                    method="Network.requestWillBeSent",
+                    params=dict(frameId="frameid1", requestId="reqid1"),
+                )
+            )
+        )
+        await websocket.send(
+            json.dumps(
+                dict(
+                    method="Network.responseReceived",
+                    params=dict(
+                        requestId="reqid1",
+                        response=dict(url=navigate_cmd["params"]["url"], status=200),
+                    ),
+                )
+            )
+        )
+    except websockets.ConnectionClosed:
+        pass
+
+
+@pytest.mark.asyncio
+async def test_frame_req_listener(websocket_server):
+    """
+    FrameRequestListener should pick up the status from the network request response.
+    """
+    ws_server, uri = websocket_server
+    assert ws_server.is_serving
+    cdp = CDPSession()
+    await cdp.connect(uri)
+    try:
+        req_listener = FrameRequestListener(cdp, "frameid1")
+        url = "http://www.example.com"
+        await cdp.send("Page.navigate", dict(url=url))
+        resp = await asyncio.wait_for(req_listener, timeout=1)
+        assert resp["url"] == url
+        assert resp["status"] == 200
+    finally:
+        await cdp.disconnect()

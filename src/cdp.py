@@ -64,23 +64,19 @@ class FrameRequestListener:
             ["Network.requestWillBeSent", "Network.responseReceived"]
         ):
             method = msg.get("method")
-            if all(
-                (
-                    self._request_id is None,
-                    method == "Network.requestWillBeSent",
-                    msg["params"]["frameId"] == self._frame_id,
-                )
+            if (
+                self._request_id is None
+                and method == "Network.requestWillBeSent"
+                and msg["params"]["frameId"] == self._frame_id
             ):
                 self._request_id = msg["params"]["requestId"]
                 LOG.debug(
                     "FrameId %s has a requestId of %s", self._frame_id, self._request_id
                 )
-            elif all(
-                (
-                    self._response is None,
-                    method == "Network.responseReceived",
-                    msg["params"]["requestId"] == self._request_id,
-                )
+            elif (
+                self._response is None
+                and method == "Network.responseReceived"
+                and msg["params"]["requestId"] == self._request_id
             ):
                 self._response = msg["params"]["response"]
                 LOG.debug(
@@ -141,7 +137,7 @@ class CDPSession:
                     queue.put_nowait(data)
                 for queue in self._method_queues.get("*", []):
                     queue.put_nowait(data)
-        except asyncio.CancelledError:
+        except (asyncio.CancelledError, websockets.ConnectionClosed):
             pass
         finally:
             self.listening_stopped.set()
