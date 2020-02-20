@@ -37,7 +37,6 @@ async def chrome_ok(cdp_host):
         async with session.get(f"{cdp_host}/json") as resp:
             assert resp.status == 200, f"Chromium's JSON API returned {resp.status}"
             await resp.json()
-            LOG.debug("Chrome OK!")
 
 
 async def get_pdf(
