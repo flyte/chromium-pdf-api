@@ -255,8 +255,9 @@ async def proto_test_cdpsession_non_json_response(websocket, path):
 
 @pytest.mark.asyncio
 async def test_cdpsession_non_json_response(cdp):
-    # All we're checking for here is that the CDP rx loop doesn't stop when it receives
-    # a non-json message.
+    """
+    The CDP RX loop shouldn't stop when it receives a non-JSON response.
+    """
     with cdp.method_subscription(["finished"]) as queue:
         await cdp.send("", await_response=False)
         try:
@@ -274,8 +275,9 @@ async def proto_test_cdpsession_list_response(websocket, path):
 
 @pytest.mark.asyncio
 async def test_cdpsession_list_response(cdp):
-    # All we're checking for here is that the CDP rx loop doesn't stop when it receives
-    # a json list message instead of a dict.
+    """
+    The CDP RX loop shouldn't stop when it receives a JSON list instead of a dict.
+    """
     with cdp.method_subscription(["finished"]) as queue:
         await cdp.send("", await_response=False)
         try:
