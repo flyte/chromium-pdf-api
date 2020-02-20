@@ -199,6 +199,8 @@ async def test_frame_req_listener(cdp):
 
 async def proto_test_cdpsession_method_subscription(websocket, path):
     try:
+        # Wait for the client to say it's ready
+        await websocket.recv()
         await websocket.send(
             json.dumps(dict(method="Network.responseReceived", params=dict(rx="msg1")))
         )
@@ -220,6 +222,8 @@ async def test_cdpsession_method_subscription(cdp):
     with cdp.method_subscription(
         ["Network.responseReceived", "Network.somethingElse"]
     ) as queue:
+        # Tell the server we're ready
+        await cdp.send("", await_response=False)
         msg1 = await queue.get()
         assert msg1["method"] == "Network.responseReceived"
         assert msg1["params"]["rx"] == "msg1"
