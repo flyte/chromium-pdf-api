@@ -35,7 +35,6 @@ Example response:
 {
     "url": "https://www.google.com",
     "pdf": "<base64 string of PDF>",
-    "load_timed_out": false
 }
 ```
 
