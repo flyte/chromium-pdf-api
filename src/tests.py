@@ -12,10 +12,13 @@ from werkzeug.wrappers import Response
 
 
 @pytest.yield_fixture
-def websocket_server(request):
+def websocket_server(request, unused_tcp_port):
     loop = asyncio.new_event_loop()
     server = websockets.serve(
-        globals()[f"proto_{request.function.__name__}"], "localhost", 8765, loop=loop
+        globals()[f"proto_{request.function.__name__}"],
+        "localhost",
+        unused_tcp_port,
+        loop=loop,
     )
 
     def run():
@@ -52,6 +55,19 @@ def websocket_server(request):
     loop.run_until_complete(await_all())
     loop.close()
     thread.join()
+
+
+@pytest.mark.asyncio
+@pytest.yield_fixture
+async def cdp(websocket_server):
+    ws_server, uri = websocket_server
+    assert ws_server.is_serving
+    cdp = CDPSession()
+    await cdp.connect(uri)
+    try:
+        yield cdp
+    finally:
+        await cdp.disconnect()
 
 
 @pytest.mark.asyncio
@@ -147,23 +163,16 @@ async def proto_test_frame_req_listener(websocket, path):
 
 
 @pytest.mark.asyncio
-async def test_frame_req_listener(websocket_server):
+async def test_frame_req_listener(cdp):
     """
     FrameRequestListener should pick up the status from the network request response.
     """
-    ws_server, uri = websocket_server
-    assert ws_server.is_serving
-    cdp = CDPSession()
-    await cdp.connect(uri)
-    try:
-        req_listener = FrameRequestListener(cdp, "frameid1")
-        url = "http://www.example.com"
-        await cdp.send("Page.navigate", dict(url=url))
-        resp = await asyncio.wait_for(req_listener, timeout=1)
-        assert resp["url"] == url
-        assert resp["status"] == 200
-    finally:
-        await cdp.disconnect()
+    req_listener = FrameRequestListener(cdp, "frameid1")
+    url = "http://www.example.com"
+    await cdp.send("Page.navigate", dict(url=url))
+    resp = await asyncio.wait_for(req_listener, timeout=1)
+    assert resp["url"] == url
+    assert resp["status"] == 200
 
 
 async def proto_test_cdpsession_method_subscription(websocket, path):
@@ -185,25 +194,30 @@ async def proto_test_cdpsession_method_subscription(websocket, path):
 
 
 @pytest.mark.asyncio
-async def test_cdpsession_method_subscription(websocket_server):
-    ws_server, uri = websocket_server
-    assert ws_server.is_serving
-    cdp = CDPSession()
-    await cdp.connect(uri)
-    try:
-        with cdp.method_subscription(
-            ["Network.responseReceived", "Network.somethingElse"]
-        ) as queue:
-            msg1 = await queue.get()
-            assert msg1["method"] == "Network.responseReceived"
-            assert msg1["params"]["rx"] == "msg1"
-            msg2 = await queue.get()
-            assert msg2["method"] == "Network.somethingElse"
-            assert msg2["params"]["rx"] == "msg2"
-            msg3 = await queue.get()
-            assert msg3["method"] == "Network.responseReceived"
-            assert msg3["params"]["rx"] == "msg3"
+async def test_cdpsession_method_subscription(cdp):
+    with cdp.method_subscription(
+        ["Network.responseReceived", "Network.somethingElse"]
+    ) as queue:
+        msg1 = await queue.get()
+        assert msg1["method"] == "Network.responseReceived"
+        assert msg1["params"]["rx"] == "msg1"
+        msg2 = await queue.get()
+        assert msg2["method"] == "Network.somethingElse"
+        assert msg2["params"]["rx"] == "msg2"
+        msg3 = await queue.get()
+        assert msg3["method"] == "Network.responseReceived"
+        assert msg3["params"]["rx"] == "msg3"
 
-    finally:
-        await cdp.disconnect()
+
+async def proto_test_cdpsession_method_subscription_removes_queues(websocket, path):
+    # We don't actually need the server to do anything for this test
+    pass
+
+
+@pytest.mark.asyncio
+async def test_cdpsession_method_subscription_removes_queues(cdp):
+    with cdp.method_subscription(["Something"]) as queue:
+        assert "Something" in cdp._method_queues
+        assert queue in cdp._method_queues["Something"]
+    assert "Something" not in cdp._method_queues
 
