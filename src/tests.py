@@ -262,8 +262,7 @@ async def test_cdpsession_non_json_response(cdp):
         try:
             await asyncio.wait_for(queue.get(), timeout=5)
         except asyncio.TimeoutError:
-            pass
-        assert not cdp.listening_stopped.is_set()
+            assert not cdp.listening_stopped.is_set()
 
 
 async def proto_test_cdpsession_list_response(websocket, path):
@@ -282,5 +281,4 @@ async def test_cdpsession_list_response(cdp):
         try:
             await asyncio.wait_for(queue.get(), timeout=5)
         except asyncio.TimeoutError:
-            pass
-        assert not cdp.listening_stopped.is_set()
+            assert not cdp.listening_stopped.is_set()
