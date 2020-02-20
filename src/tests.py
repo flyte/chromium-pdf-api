@@ -244,3 +244,43 @@ def test_cdpsession_method_subscription_removes_queues():
         assert "Something" in cdp._method_queues
         assert queue in cdp._method_queues["Something"]
     assert "Something" not in cdp._method_queues
+
+
+async def proto_test_cdpsession_non_json_response(websocket, path):
+    # Wait for client to say they're ready
+    await websocket.recv()
+    await websocket.send("non json stuff")
+    await websocket.send(json.dumps(dict(method="finished")))
+
+
+@pytest.mark.asyncio
+async def test_cdpsession_non_json_response(cdp):
+    # All we're checking for here is that the CDP rx loop doesn't stop when it receives
+    # a non-json message.
+    with cdp.method_subscription(["finished"]) as queue:
+        await cdp.send("", await_response=False)
+        try:
+            await asyncio.wait_for(queue.get(), timeout=5)
+        except asyncio.TimeoutError:
+            pass
+        assert not cdp.listening_stopped.is_set()
+
+
+async def proto_test_cdpsession_list_response(websocket, path):
+    # Wait for client to say they're ready
+    await websocket.recv()
+    await websocket.send(json.dumps([]))
+    await websocket.send(json.dumps(dict(method="finished")))
+
+
+@pytest.mark.asyncio
+async def test_cdpsession_list_response(cdp):
+    # All we're checking for here is that the CDP rx loop doesn't stop when it receives
+    # a json list message instead of a dict.
+    with cdp.method_subscription(["finished"]) as queue:
+        await cdp.send("", await_response=False)
+        try:
+            await asyncio.wait_for(queue.get(), timeout=5)
+        except asyncio.TimeoutError:
+            pass
+        assert not cdp.listening_stopped.is_set()

@@ -129,7 +129,10 @@ class CDPSession:
                 try:
                     data = json.loads(msg)
                 except json.JSONDecodeError:
-                    LOG.warning("Received non-json message from websocket")
+                    LOG.warning("Received non-JSON message from websocket")
+                    continue
+                if not isinstance(data, dict):
+                    LOG.warning("Received non-dict JSON message from websocket")
                     continue
                 cmd_id = data.get("id")
                 method = data.get("method")
