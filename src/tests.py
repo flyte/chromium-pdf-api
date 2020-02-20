@@ -67,7 +67,12 @@ def websocket_server(request, unused_tcp_port):
     while datetime.now() < timeout and tasks_running():
         sleep(0.1)
     if tasks_running():
-        loop.call_soon_threadsafe(cancel_all())
+        asyncio.run_coroutine_threadsafe(cancel_all(), loop=loop)
+        await_task = asyncio.run_coroutine_threadsafe(await_all(), loop=loop)
+        try:
+            await_task.result(timeout=5)
+        except asyncio.CancelledError:
+            pass
 
     loop.call_soon_threadsafe(loop.stop)
     thread.join()
