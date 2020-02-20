@@ -1,5 +1,6 @@
 import asyncio
 import json
+from datetime import datetime, timedelta
 from threading import Thread
 from time import sleep
 from unittest.mock import Mock, patch
@@ -19,6 +20,7 @@ def websocket_server(request, unused_tcp_port):
         "localhost",
         unused_tcp_port,
         loop=loop,
+        close_timeout=2,
     )
 
     def run():
@@ -36,6 +38,14 @@ def websocket_server(request, unused_tcp_port):
             return_exceptions=True,
         )
 
+    async def cancel_all():
+        for t in asyncio.Task.all_tasks(loop=loop):
+            if t != asyncio.Task.current_task(loop=loop):
+                t.cancel()
+
+    def tasks_running():
+        return not all(t.done() for t in asyncio.Task.all_tasks(loop=loop))
+
     thread = Thread(target=run)
     thread.start()
     # Wait for the server to start listening
@@ -47,14 +57,21 @@ def websocket_server(request, unused_tcp_port):
             sleep(0.1)
     host, port = server.ws_server.sockets[0].getsockname()
     uri = f"ws://{host}:{port}"
+
     yield server.ws_server, uri
+
     loop.call_soon_threadsafe(server.ws_server.close())
-    loop.stop()
-    while loop.is_running():
+
+    # Wait for the ws_server to stop
+    timeout = datetime.now() + timedelta(seconds=5)
+    while datetime.now() < timeout and tasks_running():
         sleep(0.1)
-    loop.run_until_complete(await_all())
-    loop.close()
+    if tasks_running():
+        loop.call_soon_threadsafe(cancel_all())
+
+    loop.call_soon_threadsafe(loop.stop)
     thread.join()
+    loop.close()
 
 
 @pytest.mark.asyncio
@@ -209,15 +226,12 @@ async def test_cdpsession_method_subscription(cdp):
         assert msg3["params"]["rx"] == "msg3"
 
 
-async def proto_test_cdpsession_method_subscription_removes_queues(websocket, path):
-    # We don't actually need the server to do anything for this test
-    pass
-
-
-@pytest.mark.asyncio
-async def test_cdpsession_method_subscription_removes_queues(cdp):
+def test_cdpsession_method_subscription_removes_queues():
+    """
+    Subscription should be removed from the _method_queues set after ctx mgr exits.
+    """
+    cdp = CDPSession()
     with cdp.method_subscription(["Something"]) as queue:
         assert "Something" in cdp._method_queues
         assert queue in cdp._method_queues["Something"]
     assert "Something" not in cdp._method_queues
-

@@ -137,13 +137,14 @@ class CDPSession:
                     self._cmd_futures[cmd_id].set_result(data)
                 except KeyError:
                     pass
-                if method is not None:
-                    for queue in self._method_queues.get(method, []):
-                        queue.put_nowait(data)
+                for queue in self._method_queues.get(method, []):
+                    queue.put_nowait(data)
                 for queue in self._method_queues.get("*", []):
                     queue.put_nowait(data)
-        except (asyncio.CancelledError, websockets.ConnectionClosed):
-            pass
+        except asyncio.CancelledError:
+            LOG.debug("_msg_rx_loop task was cancelled")
+        except websockets.ConnectionClosed:
+            LOG.warning("Websocket was closed, so _msg_rx_loop task is ending")
         finally:
             self.listening_stopped.set()
 
@@ -190,7 +191,7 @@ class CDPSession:
 
     async def subscribe(self, methods):
         with self.method_subscription(methods) as queue:
-            while not self.listening_stopped.is_set():
+            while not self.listening_stopped.is_set() or not queue.empty():
                 try:
                     yield await asyncio.wait_for(queue.get(), 1)
                 except asyncio.TimeoutError:
