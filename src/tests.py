@@ -164,3 +164,46 @@ async def test_frame_req_listener(websocket_server):
         assert resp["status"] == 200
     finally:
         await cdp.disconnect()
+
+
+async def proto_test_cdpsession_method_subscription(websocket, path):
+    try:
+        await websocket.send(
+            json.dumps(dict(method="Network.responseReceived", params=dict(rx="msg1")))
+        )
+        await websocket.send(
+            json.dumps(dict(method="Network.somethingElse", params=dict(rx="msg2")))
+        )
+        await websocket.send(
+            json.dumps(dict(method="IgnoreMe", params=dict(rx="ignored")))
+        )
+        await websocket.send(
+            json.dumps(dict(method="Network.responseReceived", params=dict(rx="msg3")))
+        )
+    except websockets.ConnectionClosed:
+        pass
+
+
+@pytest.mark.asyncio
+async def test_cdpsession_method_subscription(websocket_server):
+    ws_server, uri = websocket_server
+    assert ws_server.is_serving
+    cdp = CDPSession()
+    await cdp.connect(uri)
+    try:
+        with cdp.method_subscription(
+            ["Network.responseReceived", "Network.somethingElse"]
+        ) as queue:
+            msg1 = await queue.get()
+            assert msg1["method"] == "Network.responseReceived"
+            assert msg1["params"]["rx"] == "msg1"
+            msg2 = await queue.get()
+            assert msg2["method"] == "Network.somethingElse"
+            assert msg2["params"]["rx"] == "msg2"
+            msg3 = await queue.get()
+            assert msg3["method"] == "Network.responseReceived"
+            assert msg3["params"]["rx"] == "msg3"
+
+    finally:
+        await cdp.disconnect()
+

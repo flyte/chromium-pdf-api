@@ -126,15 +126,20 @@ class CDPSession:
         try:
             while True:
                 msg = await self._ws.recv()
-                data = json.loads(msg)
+                try:
+                    data = json.loads(msg)
+                except json.JSONDecodeError:
+                    LOG.warning("Received non-json message from websocket")
+                    continue
                 cmd_id = data.get("id")
                 method = data.get("method")
                 try:
                     self._cmd_futures[cmd_id].set_result(data)
                 except KeyError:
                     pass
-                for queue in self._method_queues.get(method, []):
-                    queue.put_nowait(data)
+                if method is not None:
+                    for queue in self._method_queues.get(method, []):
+                        queue.put_nowait(data)
                 for queue in self._method_queues.get("*", []):
                     queue.put_nowait(data)
         except (asyncio.CancelledError, websockets.ConnectionClosed):
