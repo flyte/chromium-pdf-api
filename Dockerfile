@@ -6,7 +6,7 @@ ENV LC_ALL=C.UTF-8
 ARG DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && \
-    apt-get install -y chromium && \
+    apt-get install -y chromium fonts-freefont-ttf ca-certificates && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 RUN pip install pipenv
