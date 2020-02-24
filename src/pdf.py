@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 from contextlib import contextmanager
+from os import environ as env
 from random import randint
 
 import aiohttp
@@ -9,6 +10,7 @@ import websockets
 
 from cdp import CDPSession, FrameRequestListener
 
+SEMAPHORE = asyncio.Semaphore(int(env.get("PDF_CONCURRENCY", 10)))
 LOG = logging.getLogger(__name__)
 
 
@@ -59,84 +61,90 @@ async def get_pdf(
     status_timeout = int(status_timeout)
     print_timeout = int(print_timeout)
 
-    cdp = CDPSession(loop=loop)
-    async with aiohttp.ClientSession() as session:
-        async with session.get(f"{cdp_host}/json/new") as resp:
-            tab_info = await resp.json()
-    tab_id = tab_info["id"]
-
-    try:
-        ws_url = tab_info["webSocketDebuggerUrl"]
-        await cdp.connect(ws_url, close_timeout=2, max_size=max_size, ping_interval=None)
-        await cdp.send("Page.enable")
-        await cdp.send("Network.enable")
-
-        # Get the tab's main frame ID
-        ftree_resp = await cdp.send("Page.getFrameTree")
-        main_frame_id = ftree_resp["frameTree"]["frame"]["id"]
-        LOG.debug(f"Tab %s main frame ID is %s", tab_id, main_frame_id)
-
-        # Start frame request listener before we send the Page.navigate command since
-        # the Network.requestWillBeSent message comes from the browser before the
-        # response to Page.navigate does.
-        req_listener = FrameRequestListener(cdp, main_frame_id, loop=loop)
-
-        # Tell the tab to navigate to the desired URL
-        LOG.debug("Navigating tab %s frame %s to url %s", tab_id, main_frame_id, url)
-        nav_resp = await cdp.send("Page.navigate", dict(url=url, frameId=main_frame_id))
-        try:
-            raise NavigationError(
-                f'Main URL failed to load: {nav_resp["result"]["errorText"]}'
-            )
-        except KeyError:
-            pass
-        LOG.debug("Navigation response received")
-
-        # Wait for the page to load
-        LOG.debug(
-            "Awaiting page load using event %s for %s seconds", loaded_event, load_timeout
-        )
-        try:
-            await asyncio.wait_for(cdp.wait_for(loaded_event), timeout=load_timeout)
-        except asyncio.TimeoutError:
-            LOG.debug("Page load timed out")
-            raise PageLoadTimeout()
-        LOG.debug("Page finished loading")
-
-        # Check if the main page had a successful status code (the task should have
-        # already completed long before the page finished loading.)
-        LOG.debug("Awaiting main request status for %s seconds", status_timeout)
-        try:
-            response = await asyncio.wait_for(req_listener, timeout=status_timeout)
-        except asyncio.TimeoutError:
-            LOG.debug("Timeout waiting for status to be received")
-            raise StatusTimeout()
-        LOG.debug("Main request status received (%s)", response["status"])
-
-        if str(response["status"])[0] != "2":
-            raise NavigationError(
-                f"Main URL failed to load: HTTP status {response['status']}",
-                url=response["url"],
-                code=response["status"],
-            )
-
-        LOG.debug(
-            "Awaiting PDF print for %s seconds using the following options: %s",
-            print_timeout,
-            options,
-        )
-        try:
-            pdf_resp = await asyncio.wait_for(
-                cdp.send("Page.printToPDF", options), timeout=print_timeout
-            )
-        except asyncio.TimeoutError:
-            raise PDFPrintTimeout()
-        await cdp.send("Page.getFrameTree")
-        return pdf_resp["data"]
-
-    finally:
-        await cdp.disconnect()
+    async with SEMAPHORE:
+        cdp = CDPSession(loop=loop)
         async with aiohttp.ClientSession() as session:
-            async with session.get(f"{cdp_host}/json/close/{tab_id}") as resp:
-                await resp.text()
+            async with session.get(f"{cdp_host}/json/new") as resp:
+                tab_info = await resp.json()
+        tab_id = tab_info["id"]
 
+        try:
+            ws_url = tab_info["webSocketDebuggerUrl"]
+            await cdp.connect(
+                ws_url, close_timeout=2, max_size=max_size, ping_interval=None
+            )
+            await cdp.send("Page.enable")
+            await cdp.send("Network.enable")
+
+            # Get the tab's main frame ID
+            ftree_resp = await cdp.send("Page.getFrameTree")
+            main_frame_id = ftree_resp["frameTree"]["frame"]["id"]
+            LOG.debug(f"Tab %s main frame ID is %s", tab_id, main_frame_id)
+
+            # Start frame request listener before we send the Page.navigate command since
+            # the Network.requestWillBeSent message comes from the browser before the
+            # response to Page.navigate does.
+            req_listener = FrameRequestListener(cdp, main_frame_id, loop=loop)
+
+            # Tell the tab to navigate to the desired URL
+            LOG.debug("Navigating tab %s frame %s to url %s", tab_id, main_frame_id, url)
+            nav_resp = await cdp.send(
+                "Page.navigate", dict(url=url, frameId=main_frame_id)
+            )
+            try:
+                raise NavigationError(
+                    f'Main URL failed to load: {nav_resp["result"]["errorText"]}'
+                )
+            except KeyError:
+                pass
+            LOG.debug("Navigation response received")
+
+            # Wait for the page to load
+            LOG.debug(
+                "Awaiting page load using event %s for %s seconds",
+                loaded_event,
+                load_timeout,
+            )
+            try:
+                await asyncio.wait_for(cdp.wait_for(loaded_event), timeout=load_timeout)
+            except asyncio.TimeoutError:
+                LOG.debug("Page load timed out")
+                raise PageLoadTimeout()
+            LOG.debug("Page finished loading")
+
+            # Check if the main page had a successful status code (the task should have
+            # already completed long before the page finished loading.)
+            LOG.debug("Awaiting main request status for %s seconds", status_timeout)
+            try:
+                response = await asyncio.wait_for(req_listener, timeout=status_timeout)
+            except asyncio.TimeoutError:
+                LOG.debug("Timeout waiting for status to be received")
+                raise StatusTimeout()
+            LOG.debug("Main request status received (%s)", response["status"])
+
+            if str(response["status"])[0] != "2":
+                raise NavigationError(
+                    f"Main URL failed to load: HTTP status {response['status']}",
+                    url=response["url"],
+                    code=response["status"],
+                )
+
+            LOG.debug(
+                "Awaiting PDF print for %s seconds using the following options: %s",
+                print_timeout,
+                options,
+            )
+            try:
+                pdf_resp = await asyncio.wait_for(
+                    cdp.send("Page.printToPDF", options), timeout=print_timeout
+                )
+            except asyncio.TimeoutError:
+                raise PDFPrintTimeout()
+            await cdp.send("Page.getFrameTree")
+            return pdf_resp["data"]
+
+        finally:
+            await cdp.disconnect()
+            async with aiohttp.ClientSession() as session:
+                async with session.get(f"{cdp_host}/json/close/{tab_id}") as resp:
+                    await resp.text()
