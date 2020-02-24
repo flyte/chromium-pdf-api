@@ -122,7 +122,8 @@ async def get_pdf(
                 raise StatusTimeout()
             LOG.debug("Main request status received (%s)", response["status"])
 
-            if str(response["status"])[0] != "2":
+            status = str(response["status"])
+            if not status.startswith("2") and not status == "304":
                 raise NavigationError(
                     f"Main URL failed to load: HTTP status {response['status']}",
                     url=response["url"],
@@ -140,7 +141,7 @@ async def get_pdf(
                 )
             except asyncio.TimeoutError:
                 raise PDFPrintTimeout()
-            await cdp.send("Page.getFrameTree")
+            # await cdp.send("Page.getFrameTree")
             return pdf_resp["data"]
 
         finally:

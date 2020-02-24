@@ -1,13 +1,16 @@
 import asyncio
 import json
 import logging
+import zlib
+from base64 import b64decode, b64encode
 from os import environ as env
 
 from aiohttp import web
+
 from cdp import PayloadTooBig
 from pdf import NavigationError, chrome_ok, get_pdf
 
-CDP_HOST = "http://localhost:9222"
+CDP_HOST = env.get("CDP_HOST", "http://localhost:9222")
 
 # Set the log level for this module
 LOG = logging.getLogger(__name__)
@@ -60,6 +63,7 @@ async def pdf(request):
     if "url" not in data:
         return bad_request("Must provide 'url'", data)
     timeout = int(data.pop("timeout", 120))
+    compress = data.pop("compress", False)
 
     LOG.info(f"Generating PDF for url {data['url']}")
 
@@ -72,6 +76,9 @@ async def pdf(request):
     except NavigationError as e:
         url = e.url or data["url"]
         return failed_dependency(str(e), url, e.code)
+
+    if compress:
+        pdf = b64encode(zlib.compress(b64decode(pdf))).decode("utf8")
 
     LOG.info("PDF returned successfully")
     return web.json_response(dict(pdf=pdf, **data))
