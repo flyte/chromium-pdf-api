@@ -5,6 +5,7 @@ import logging.config
 import zlib
 from base64 import b64decode, b64encode
 from os import environ as env
+from uuid import uuid4
 
 from aiohttp import web
 
@@ -29,15 +30,15 @@ logging.config.dictConfig(
         ),
         loggers=dict(
             cdp=dict(
-                level=getattr(logging, env.get("CDP_LOG_LEVEL", "INFO").upper()),
+                level=getattr(logging, env.get("CDP_LOG_LEVEL", "DEBUG").upper()),
                 handlers=["console"],
             ),
             pdf=dict(
-                level=getattr(logging, env.get("PDF_LOG_LEVEL", "INFO").upper()),
+                level=getattr(logging, env.get("PDF_LOG_LEVEL", "DEBUG").upper()),
                 handlers=["console"],
             ),
             server=dict(
-                level=getattr(logging, env.get("SERVER_LOG_LEVEL", "INFO").upper()),
+                level=getattr(logging, env.get("SERVER_LOG_LEVEL", "DEBUG").upper()),
                 handlers=["console"],
             ),
         ),
@@ -75,6 +76,7 @@ def failed_dependency(msg, url, code, data=None):
 
 
 async def pdf(request):
+    trace = str(uuid4())
     try:
         data = await request.json()
     except json.decoder.JSONDecodeError:
@@ -85,10 +87,10 @@ async def pdf(request):
     timeout = int(data.pop("timeout", 120))
     compress = data.pop("compress", False)
 
-    LOG.info(f"Generating PDF for url {data['url']}")
+    LOG.info(f"{trace} Generating PDF for url {data['url']}")
 
     try:
-        pdf = await asyncio.wait_for(get_pdf(CDP_HOST, **data), timeout)
+        pdf = await asyncio.wait_for(get_pdf(CDP_HOST, **data, trace=trace), timeout)
     except TimeoutError as e:
         return gateway_timeout(str(e), data)
     except PayloadTooBig as e:
@@ -100,7 +102,7 @@ async def pdf(request):
     if compress:
         pdf = b64encode(zlib.compress(b64decode(pdf))).decode("utf8")
 
-    LOG.info("PDF returned successfully")
+    LOG.info(f"{trace} PDF returned successfully")
     return web.json_response(dict(pdf=pdf, **data))
 
 

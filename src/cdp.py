@@ -10,6 +10,12 @@ import websockets
 LOG = logging.getLogger(__name__)
 
 
+def log(trace, level, msg, *args, **kwargs):
+    if trace is not None:
+        msg = f"{trace} {msg}"
+    LOG.log(level, msg, *args, **kwargs)
+
+
 class ReceiveLoopStopped(Exception):
     pass
 
@@ -28,10 +34,11 @@ class FrameRequestListener:
     intermediary redirects (via Network.responseReceivedExtraInfo).
     """
 
-    def __init__(self, cdp, frame_id, loop=None):
+    def __init__(self, cdp, frame_id, loop=None, trace=None):
         self._cdp = cdp
         self._frame_id = frame_id
         self._loop = loop or asyncio.get_event_loop()
+        self._trace = trace
         self._request_id = None
         self._response = None
         self._update_task = self._loop.create_task(self._get_frame_updates())
@@ -70,8 +77,12 @@ class FrameRequestListener:
                 and msg["params"]["frameId"] == self._frame_id
             ):
                 self._request_id = msg["params"]["requestId"]
-                LOG.debug(
-                    "FrameId %s has a requestId of %s", self._frame_id, self._request_id
+                log(
+                    self._trace,
+                    logging.DEBUG,
+                    "FrameId %s has a requestId of %s",
+                    self._frame_id,
+                    self._request_id,
                 )
             elif (
                 self._response is None
@@ -79,7 +90,9 @@ class FrameRequestListener:
                 and msg["params"]["requestId"] == self._request_id
             ):
                 self._response = msg["params"]["response"]
-                LOG.debug(
+                log(
+                    self._trace,
+                    logging.DEBUG,
                     "FrameId %s has received a response of %s for url %s",
                     self._frame_id,
                     self._response["status"],
@@ -89,8 +102,9 @@ class FrameRequestListener:
 
 
 class CDPSession:
-    def __init__(self, loop=None):
+    def __init__(self, loop=None, trace=None):
         self._loop = loop or asyncio.get_event_loop()
+        self._trace = trace
         self.listening_cancelled = asyncio.Event(loop=self._loop)
         self.listening_stopped = asyncio.Event(loop=self._loop)
         self._cmd_futures = {}
@@ -129,10 +143,18 @@ class CDPSession:
                 try:
                     data = json.loads(msg)
                 except json.JSONDecodeError:
-                    LOG.warning("Received non-JSON message from websocket")
+                    log(
+                        self._trace,
+                        logging.WARNING,
+                        "Received non-JSON message from websocket",
+                    )
                     continue
                 if not isinstance(data, dict):
-                    LOG.warning("Received non-dict JSON message from websocket")
+                    log(
+                        self._trace,
+                        logging.WARNING,
+                        "Received non-dict JSON message from websocket",
+                    )
                     continue
                 cmd_id = data.get("id")
                 method = data.get("method")
@@ -145,9 +167,13 @@ class CDPSession:
                 for queue in self._method_queues.get("*", []):
                     queue.put_nowait(data)
         except asyncio.CancelledError:
-            LOG.debug("_msg_rx_loop task was cancelled")
+            log(self._trace, logging.DEBUG, "_msg_rx_loop task was cancelled")
         except websockets.ConnectionClosed:
-            LOG.warning("Websocket was closed, so _msg_rx_loop task is ending")
+            log(
+                self._trace,
+                logging.WARNING,
+                "Websocket was closed, so _msg_rx_loop task is ending",
+            )
         finally:
             self.listening_stopped.set()
 
@@ -175,7 +201,9 @@ class CDPSession:
             if exception is not None:
                 cause = exception.__cause__ or exception
                 raise cause
-            raise ReceiveLoopStopped("CDP websocket listening loop has stopped")
+            raise ReceiveLoopStopped(
+                f"{self._trace} CDP websocket listening loop has stopped"
+            )
         finally:
             if await_response:
                 del self._cmd_futures[cmd_id]
@@ -199,7 +227,9 @@ class CDPSession:
                     yield await asyncio.wait_for(queue.get(), 1)
                 except asyncio.TimeoutError:
                     continue
-            raise ReceiveLoopStopped("CDP websocket listening loop has stopped")
+            raise ReceiveLoopStopped(
+                f"{self._trace} CDP websocket listening loop has stopped"
+            )
 
     async def wait_for(self, method):
         with self.method_subscription([method]) as queue:
