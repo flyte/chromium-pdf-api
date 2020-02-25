@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import logging.config
 import zlib
 from base64 import b64decode, b64encode
 from os import environ as env
@@ -12,20 +13,39 @@ from pdf import NavigationError, chrome_ok, get_pdf
 
 CDP_HOST = env.get("CDP_HOST", "http://localhost:9222")
 
-# Set the log level for this module
+logging.config.dictConfig(
+    dict(
+        version=1,
+        formatters=dict(
+            standard=dict(format="%(asctime)s %(name)s (%(levelname)s): %(message)s")
+        ),
+        handlers=dict(
+            console={
+                "class": "logging.StreamHandler",
+                "formatter": "standard",
+                "level": "DEBUG",
+                "stream": "ext://sys.stdout",
+            }
+        ),
+        loggers=dict(
+            cdp=dict(
+                level=getattr(logging, env.get("CDP_LOG_LEVEL", "INFO").upper()),
+                handlers=["console"],
+            ),
+            pdf=dict(
+                level=getattr(logging, env.get("PDF_LOG_LEVEL", "INFO").upper()),
+                handlers=["console"],
+            ),
+            server=dict(
+                level=getattr(logging, env.get("SERVER_LOG_LEVEL", "INFO").upper()),
+                handlers=["console"],
+            ),
+        ),
+    )
+)
+
+
 LOG = logging.getLogger(__name__)
-LOG.addHandler(logging.StreamHandler())
-LOG.setLevel(getattr(logging, env.get("SERVER_LOG_LEVEL", "INFO").upper()))
-
-# Set the log level of the pdf module
-_PDF_LOG = logging.getLogger("pdf")
-_PDF_LOG.addHandler(logging.StreamHandler())
-_PDF_LOG.setLevel(getattr(logging, env.get("PDF_LOG_LEVEL", "INFO").upper()))
-
-# Set the log level of the cdp module
-_CDP_LOG = logging.getLogger("cdp")
-_CDP_LOG.addHandler(logging.StreamHandler())
-_CDP_LOG.setLevel(getattr(logging, env.get("CDP_LOG_LEVEL", "INFO").upper()))
 
 
 def bad_request(msg, data=None):
