@@ -140,6 +140,7 @@ class CDPSession:
         try:
             while True:
                 msg = await self._ws.recv()
+                log(self._trace, logging.DEBUG, "CDP message from browser: %s", msg)
                 try:
                     data = json.loads(msg)
                 except json.JSONDecodeError:

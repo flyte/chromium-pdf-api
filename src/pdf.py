@@ -179,3 +179,4 @@ async def get_pdf(
             async with aiohttp.ClientSession() as session:
                 async with session.get(f"{cdp_host}/json/close/{tab_id}") as resp:
                     await resp.text()
+                    log(trace, logging.DEBUG, "Tab %s closed", tab_id)
