@@ -106,3 +106,29 @@ docker run -ti --rm -p 8080:8080 -e PDF_CONCURRENCY=2 flyte/chromium-pdf-api
 ```
 
 This can help to plan for the amount of memory your container is going to use, although it really depends how much memory the site you're PDFing uses as well.
+
+## Cooperative Loading
+
+Sometimes you'll want to make sure that any asynchronous content has completed loading before creating your PDF. You may do this by adding an HTML input element to the page with class `pdfloading`, then changing its value to `loaded` using JavaScript once your content is fully ready.
+
+For example:
+
+```html
+<html>
+    <body>
+        <h1>My PDF</h1>
+        <input type="hidden" id="loading1" class="pdfloading" value="loading" />
+        <input type="hidden" id="loading2" class="pdfloading" value="loading" />
+        <script>
+            setTimeout(function() {
+                document.getElementById("loading1").value = "loaded"
+            }, 5000)
+        </script>
+        <script>
+            setTimeout(function() {
+                document.getElementById("loading2").value = "loaded"
+            }, 8000)
+        </script>
+    </body>
+</html>
+```
