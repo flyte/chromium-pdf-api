@@ -1,7 +1,9 @@
 import asyncio
+from asyncio.queues import QueueEmpty
 import json
 import logging
 from contextlib import contextmanager
+from datetime import datetime, timedelta
 from os import environ as env
 from random import randint
 
@@ -104,59 +106,152 @@ async def get_pdf(
                 main_frame_id,
                 url,
             )
-            nav_resp = await cdp.send(
-                "Page.navigate", dict(url=url, frameId=main_frame_id)
-            )
-            try:
-                raise NavigationError(
-                    f'Main URL failed to load: {nav_resp["result"]["errorText"]}'
+            with cdp.method_subscription(["DOM.attributeModified"]) as attrib_mod_queue:
+                nav_resp = await cdp.send(
+                    "Page.navigate", dict(url=url, frameId=main_frame_id)
                 )
-            except KeyError:
-                pass
-            log(trace, logging.DEBUG, "Navigation response received")
+                try:
+                    raise NavigationError(
+                        f'Main URL failed to load: {nav_resp["result"]["errorText"]}'
+                    )
+                except KeyError:
+                    pass
+                log(trace, logging.DEBUG, "Navigation response received")
 
-            # Wait for the page to load
-            log(
-                trace,
-                logging.DEBUG,
-                "Awaiting page load using event %s for %s seconds",
-                loaded_event,
-                load_timeout,
-            )
-            try:
-                await asyncio.wait_for(cdp.wait_for(loaded_event), timeout=load_timeout)
-            except asyncio.TimeoutError:
-                log(trace, logging.DEBUG, "Page load timed out")
-                raise PageLoadTimeout()
-            log(trace, logging.DEBUG, "Page finished loading")
-
-            # Check if the main page had a successful status code (the task should have
-            # already completed long before the page finished loading.)
-            log(
-                trace,
-                logging.DEBUG,
-                "Awaiting main request status for %s seconds",
-                status_timeout,
-            )
-            try:
-                response = await asyncio.wait_for(req_listener, timeout=status_timeout)
-            except asyncio.TimeoutError:
-                log(trace, logging.DEBUG, "Timeout waiting for status to be received")
-                raise StatusTimeout()
-            log(
-                trace,
-                logging.DEBUG,
-                "Main request status received (%s)",
-                response["status"],
-            )
-
-            status = str(response["status"])
-            if not status.startswith("2") and not status == "304":
-                raise NavigationError(
-                    f"Main URL failed to load: HTTP status {response['status']}",
-                    url=response["url"],
-                    code=response["status"],
+                # Wait for the page to load
+                log(
+                    trace,
+                    logging.DEBUG,
+                    "Awaiting page load using event %s for %s seconds",
+                    loaded_event,
+                    load_timeout,
                 )
+                try:
+                    await asyncio.wait_for(
+                        cdp.wait_for(loaded_event), timeout=load_timeout
+                    )
+                except asyncio.TimeoutError:
+                    log(trace, logging.DEBUG, "Page load timed out")
+                    raise PageLoadTimeout()
+                log(trace, logging.DEBUG, "Page finished loading")
+
+                # Check if the main page had a successful status code. The task should have
+                # already completed long before the page finished loading.
+                log(
+                    trace,
+                    logging.DEBUG,
+                    "Awaiting main request status for %s seconds",
+                    status_timeout,
+                )
+                try:
+                    response = await asyncio.wait_for(
+                        req_listener, timeout=status_timeout
+                    )
+                except asyncio.TimeoutError:
+                    log(trace, logging.DEBUG, "Timeout waiting for status to be received")
+                    raise StatusTimeout()
+                log(
+                    trace,
+                    logging.DEBUG,
+                    "Main request status received (%s)",
+                    response["status"],
+                )
+
+                status = str(response["status"])
+                if not status.startswith("2") and status != "304":
+                    raise NavigationError(
+                        f"Main URL failed to load: HTTP status {response['status']}",
+                        url=response["url"],
+                        code=response["status"],
+                    )
+
+                # TODO: Tasks pending completion -@flyte at 12/07/2021, 11:10:33
+                # Reduce the timeout by how long we've already waited for loading.
+                try:
+                    doc_resp = await asyncio.wait_for(
+                        cdp.send("DOM.getDocument"),
+                        timeout=load_timeout,
+                    )
+                except asyncio.TimeoutError:
+                    log(
+                        trace,
+                        logging.DEBUG,
+                        "Timeout waiting for document to be returned",
+                    )
+                    raise PageLoadTimeout()
+                log(trace, logging.DEBUG, "Document returned")
+
+                print(doc_resp)
+
+                log(trace, logging.DEBUG, "Checking for cooperative loading delay")
+                try:
+                    query_resp = await asyncio.wait_for(
+                        cdp.send(
+                            "DOM.querySelectorAll",
+                            dict(
+                                nodeId=doc_resp["root"]["nodeId"],
+                                selector="input.pdfloading[value='loading']",
+                            ),
+                        ),
+                        timeout=load_timeout,
+                    )
+                except asyncio.TimeoutError:
+                    log(
+                        trace,
+                        logging.DEBUG,
+                        "Timeout waiting for querySelector to be returned",
+                    )
+                    raise PageLoadTimeout()
+
+                loading_elements = set(query_resp["nodeIds"])
+                if loading_elements:
+                    log(
+                        trace,
+                        logging.DEBUG,
+                        "Waiting for cooperative loading to complete",
+                    )
+                    while loading_elements and (
+                        not cdp.listening_stopped.is_set() or not attrib_mod_queue.empty()
+                    ):
+                        try:
+                            modification = await asyncio.wait_for(
+                                attrib_mod_queue.get(), timeout=load_timeout
+                            )
+                        except TimeoutError:
+                            log(
+                                trace,
+                                logging.DEBUG,
+                                "Waiting for DOM.attributeModified event timed out",
+                            )
+                            raise PageLoadTimeout()
+
+                        node_id = modification["params"]["nodeId"]
+                        if node_id not in loading_elements:
+                            log(
+                                trace,
+                                logging.DEBUG,
+                                "Modification was not on a loading element",
+                            )
+                            continue
+                        if modification["params"]["name"] != "value":
+                            log(
+                                trace,
+                                logging.DEBUG,
+                                "Modification was not of the 'value' attribute",
+                            )
+                            continue
+                        if modification["params"]["value"] != "loaded":
+                            log(
+                                trace,
+                                logging.DEBUG,
+                                "Modification value was not set to 'loaded'",
+                            )
+                            continue
+                        loading_elements.remove(node_id)
+                        if not loading_elements:
+                            log(trace, logging.DEBUG, "Cooperative loading complete")
+                else:
+                    log(trace, logging.DEBUG, "No cooperative loading used")
 
             log(
                 trace,

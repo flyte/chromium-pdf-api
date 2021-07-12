@@ -1,0 +1,27 @@
+<html>
+    <body>
+        <h1>My PDF</h1>
+        <input type="hidden" id="loading1" class="pdfloading" value="loading" />
+        <input type="hidden" id="loading2" class="pdfloading" value="loading" />
+        <script>
+            setTimeout(function() {
+                document.getElementById("loading1").value = "loaded"
+            }, 5000)
+        </script>
+        <script>
+            setTimeout(function() {
+                document.getElementById("loading2").value = "loaded"
+            }, 8000)
+        </script>
+        <script>
+            let loadingInterval = setInterval(function() {
+                console.log("Checking loading status...")
+                if (document.querySelector("input.pdfloading[value='loading']") == null) {
+                    console.log("Loaded!")
+                    clearInterval(loadingInterval)
+                    // alert("Loaded!")
+                }
+            }, 1000)
+        </script>
+    </body>
+</html>

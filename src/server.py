@@ -98,6 +98,9 @@ async def pdf(request):
     except NavigationError as e:
         url = e.url or data["url"]
         return failed_dependency(str(e), url, e.code)
+    except Exception as e:
+        print(e)
+        raise
 
     if compress:
         pdf = b64encode(zlib.compress(b64decode(pdf))).decode("utf8")

@@ -4,7 +4,6 @@ import logging
 from contextlib import contextmanager
 from random import randint
 
-import aiohttp
 import websockets
 
 LOG = logging.getLogger(__name__)
